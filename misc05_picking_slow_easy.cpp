@@ -25,6 +25,7 @@ using namespace glm;
 
 #include <iostream>
 using namespace std;
+#include <fstream>
 
 #include "tga.h"
 
@@ -65,6 +66,8 @@ void cleanup(void);
 static void keyCallback(GLFWwindow*, int, int, int, int);
 static void mouseCallback(GLFWwindow*, int, int, int);
 void resetScene(void);
+void createVAOsForTex(Vertex[], GLushort[], int);
+void saveControlPoints(void);
 
 // GLOBAL VARIABLES
 GLFWwindow* window;
@@ -77,6 +80,7 @@ std::string gMessage;
 
 GLuint programID;
 GLuint pickingProgramID;
+GLuint textureProgramID;
 
 const GLuint NumObjects = 256;	// ATTN: THIS NEEDS TO CHANGE AS YOU ADD NEW OBJECTS
 GLuint VertexArrayId[NumObjects] = { 0 };
@@ -94,6 +98,7 @@ GLuint ProjMatrixID;
 GLuint PickingMatrixID;
 GLuint pickingColorID;
 GLuint LightID;
+GLuint TextureID;
 
 GLint gX = 0.0;
 GLint gZ = 0.0;
@@ -103,14 +108,16 @@ bool animation = false;
 GLfloat phi = 0.0;
 GLfloat cameraAngleTheta = M_PI/4;
 GLfloat cameraAnglePhi = asin(1/sqrt(3));
-GLfloat cameraSphereRadius = sqrt(300);
+GLfloat cameraSphereRadius = sqrt(675);
 Vertex* Face_Verts;
 GLushort* Face_Idcs;
 Vertex ControlMeshVerts[441];
 GLushort ControlMeshIdcs[1764];
-long *image_width;
-long *image_height;
-GLuint textureID;
+GLushort ControlMeshIdcsForTex[2646];
+long image_width;
+long image_height;
+GLuint texID;
+GLfloat uv[882];
 
 bool moveCameraLeft = false;
 bool moveCameraRight = false;
@@ -126,13 +133,13 @@ void loadObject(char* file, glm::vec4 color, Vertex * &out_Vertices, GLushort* &
 	std::vector<glm::vec3> vertices;
 	std::vector<glm::vec2> uvs;
 	std::vector<glm::vec3> normals;
-	bool res = loadOBJ(file, vertices, normals);
+    bool res = loadOBJ(file, vertices, normals);
 
 	std::vector<GLushort> indices;
 	std::vector<glm::vec3> indexed_vertices;
 	std::vector<glm::vec2> indexed_uvs;
 	std::vector<glm::vec3> indexed_normals;
-	indexVBO(vertices, normals, indices, indexed_vertices, indexed_normals);
+    indexVBO(vertices, normals, indices, indexed_vertices, indexed_normals);
 
 	const size_t vertCount = indexed_vertices.size();
 	const size_t idxCount = indices.size();
@@ -197,8 +204,26 @@ void createObjects(void)
         k++;
     }
 
+    texID = load_texture_TGA("biswas_sayak_new.tga", &image_width, &image_height, GL_CLAMP, GL_CLAMP);
+
+    /*glm::vec3 n = glm::vec3(ControlMeshVerts[1].Position[0], ControlMeshVerts[1].Position[1], ControlMeshVerts[1].Position[2]);
+    glm::vec3 u = glm::normalize(glm::vec3(ControlMeshVerts[1].Position[1], -ControlMeshVerts[1].Position[0], 0));
+    glm::vec3 v = glm::cross(n, u);*/
+
     for(int i = 0; i < 441; i++) {
-        cout << ControlMeshVerts[i].Position[0] << " " << ControlMeshVerts[i].Position[1] << " " << ControlMeshVerts[i].Position[2] << endl;
+        /*GLfloat u_coord = glm::dot(u,
+                                   glm::vec3(ControlMeshVerts[i].Position[0],
+                                    ControlMeshVerts[i].Position[1],
+                                    ControlMeshVerts[i].Position[2]));
+        GLfloat v_coord = glm::dot(v, glm::vec3(ControlMeshVerts[i].Position[0],
+                                   ControlMeshVerts[i].Position[1],
+                                   ControlMeshVerts[i].Position[2]));
+        cout << u_coord << " " << v_coord << endl;
+        uv[2 * i] = u_coord;
+        uv[2 * i + 1] = v_coord;*/
+        uv[2 * i] = (ControlMeshVerts[i].Position[0] + 10) / 20;
+        uv[2 * i + 1] = (ControlMeshVerts[i].Position[1]) / 20;
+
         if((i + 1) % 21 != 0 && i < 420 && i != 440) {
             ControlMeshIdcs[4 * i] = i;
             ControlMeshIdcs[4 * i + 1] = i + 1;
@@ -213,11 +238,23 @@ void createObjects(void)
             ControlMeshIdcs[4 * i + 2] = i;
             ControlMeshIdcs[4 * i + 3] = i + 1;
         }
+        if(i == 0 || (i + 1) % 21 != 0 && i < 420) {
+            ControlMeshIdcsForTex[6 * i] = i;
+            ControlMeshIdcsForTex[6 * i + 1] = i + 1;
+            ControlMeshIdcsForTex[6 * i + 2] = i + 22;
+            ControlMeshIdcsForTex[6 * i + 3] = i + 22;
+            ControlMeshIdcsForTex[6 * i + 4] = i + 21;
+            ControlMeshIdcsForTex[6 * i + 5] = i;
+        }
     }
 
     VertexBufferSize[2] = sizeof(ControlMeshVerts);
     IndexBufferSize[2] = sizeof(ControlMeshIdcs);
     createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+    VertexBufferSize[3] = sizeof(ControlMeshVerts);
+    IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+    createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
 	
 	//-- .OBJs --//
 
@@ -227,7 +264,6 @@ void createObjects(void)
     loadObject("biswas_sayak.obj", glm::vec4(1.0, 0.0, 0.0, 1.0), Face_Verts, Face_Idcs, 4);
     createVAOs(Face_Verts, Face_Idcs, 4);
 
-    textureID = load_texture_TGA("biswas_sayak.tga", image_width, image_height, GL_CLAMP, GL_CLAMP);
 
 }
 
@@ -287,7 +323,8 @@ void renderScene(void)
             glPointSize(7.0f);
             glBindVertexArray(VertexArrayId[2]);
             glDrawArrays(GL_POINTS, 0, 441);
-            glDrawElements(GL_LINES, 1764, GL_UNSIGNED_SHORT, (GLvoid*)0);
+            //glPolygonMode(GL_FRONT_AND_BACK,GL_LINE);
+            glDrawElements(GL_LINES, 1746, GL_UNSIGNED_SHORT, (GLvoid*)0);
         }
 
         if(shouldDisplayFaceMesh) {
@@ -296,9 +333,30 @@ void renderScene(void)
         }
 			
 		glBindVertexArray(0);
-
 	}
-	glUseProgram(0);
+
+    glUseProgram(textureProgramID); {
+        glm::vec3 lightPos = glm::vec3(4, 4, 4);
+        glm::mat4x4 ModelMatrix = glm::mat4(1.0);
+        glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
+        glUniformMatrix4fv(ViewMatrixID, 1, GL_FALSE, &gViewMatrix[0][0]);
+        glUniformMatrix4fv(ProjMatrixID, 1, GL_FALSE, &gProjectionMatrix[0][0]);
+        glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrix[0][0]);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texID);
+        glUniform1i(TextureID, 0);
+
+        /*glDisable(GL_PROGRAM_POINT_SIZE);
+        glEnable(GL_POINT_SIZE);
+        glPointSize(7.0f);*/
+        glBindVertexArray(VertexArrayId[3]);
+        glDrawElements(GL_TRIANGLES, 2646, GL_UNSIGNED_SHORT, (GLvoid*)0);
+
+        glBindVertexArray(0);
+    }
+
+    glUseProgram(0);
 	// Draw GUI
 	TwDraw();
 
@@ -422,13 +480,14 @@ void initOpenGL(void)
 	//gProjectionMatrix = glm::ortho(-4.0f, 4.0f, -3.0f, 3.0f, 0.0f, 100.0f); // In world coordinates
 
 	// Camera matrix
-	gViewMatrix = glm::lookAt(glm::vec3(10.0, 10.0, 10.0f),	// eye
+    gViewMatrix = glm::lookAt(glm::vec3(15.0, 15.0, 15.0f),	// eye
 		glm::vec3(0.0, 0.0, 0.0),	// center
 		glm::vec3(0.0, 1.0, 0.0));	// up
 
 	// Create and compile our GLSL program from the shaders
 	programID = LoadShaders("StandardShading.vertexshader", "StandardShading.fragmentshader");
 	pickingProgramID = LoadShaders("Picking.vertexshader", "Picking.fragmentshader");
+    textureProgramID = LoadShaders("TextureShading.vertexshader", "TextureShading.fragmentshader");
 
 	// Get a handle for our "MVP" uniform
 	MatrixID = glGetUniformLocation(programID, "MVP");
@@ -441,6 +500,7 @@ void initOpenGL(void)
 	pickingColorID = glGetUniformLocation(pickingProgramID, "PickingColor");
 	// Get a handle for our "LightPosition" uniform
 	LightID = glGetUniformLocation(programID, "LightPosition_worldspace");
+    TextureID = glGetUniformLocation(textureProgramID, "myTextureSampler");
 
 	createObjects();
 }
@@ -489,6 +549,57 @@ void createVAOs(Vertex Vertices[], unsigned short Indices[], int ObjectId) {
 			gluErrorString(ErrorCheckValue)
 			);
 	}
+}
+
+void createVAOsForTex(Vertex Vertices[], unsigned short Indices[], int ObjectId) {
+    GLenum ErrorCheckValue = glGetError();
+    const size_t VertexSize = sizeof(Vertices[0]);
+    const size_t RgbOffset = sizeof(Vertices[0].Position);
+    const size_t Normaloffset = sizeof(Vertices[0].Color) + RgbOffset;
+
+    // Create Vertex Array Object
+    glGenVertexArrays(1, &VertexArrayId[ObjectId]);	//
+    glBindVertexArray(VertexArrayId[ObjectId]);		//
+
+    // Create Buffer for vertex data
+    glGenBuffers(1, &VertexBufferId[ObjectId]);
+    glBindBuffer(GL_ARRAY_BUFFER, VertexBufferId[ObjectId]);
+    glBufferData(GL_ARRAY_BUFFER, VertexBufferSize[ObjectId], Vertices, GL_STATIC_DRAW);
+
+    // Create Buffer for indices
+    if (Indices != NULL) {
+        glGenBuffers(1, &IndexBufferId[ObjectId]);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, IndexBufferId[ObjectId]);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, IndexBufferSize[ObjectId], Indices, GL_STATIC_DRAW);
+    }
+
+    // Assign vertex attributes
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, VertexSize, 0);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, VertexSize, (GLvoid*)Normaloffset);
+
+    glEnableVertexAttribArray(0);	// position
+    //glEnableVertexAttribArray(2);	// normal
+
+    GLuint uvbuffer;
+    glGenBuffers(1, &uvbuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, uvbuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(uv), uv, GL_STATIC_DRAW);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, (GLvoid*)0);
+    glEnableVertexAttribArray(1);	// color
+
+
+    // Disable our Vertex Buffer Object
+    glBindVertexArray(0);
+
+    ErrorCheckValue = glGetError();
+    if (ErrorCheckValue != GL_NO_ERROR)
+    {
+        fprintf(
+            stderr,
+            "ERROR: Could not create a VBO: %s \n",
+            gluErrorString(ErrorCheckValue)
+            );
+    }
 }
 
 void cleanup(void)
@@ -560,6 +671,9 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
         case GLFW_KEY_R:
             shouldResetScene = false;
             break;
+        case GLFW_KEY_S:
+            saveControlPoints();
+            break;
         case GLFW_KEY_LEFT:
             moveCameraLeft = false;
             break;
@@ -588,6 +702,35 @@ static void mouseCallback(GLFWwindow* window, int button, int action, int mods)
 void resetScene(void) {
     cameraAngleTheta = M_PI/4;
     cameraAnglePhi = asin(1/sqrt(3));
+}
+
+void saveControlPoints() {
+    cout << "Writing Control Point file ..." << endl;
+    ofstream controlPointFile;
+    controlPointFile.open("/home/sayak/controlPoints.obj", ios::out);
+    if(controlPointFile.is_open()) {
+        for(int i = 0; i < 441; i++) {
+            controlPointFile << "v ";
+            controlPointFile << to_string(ControlMeshVerts[i].Position[0]) + " ";
+            controlPointFile << to_string(ControlMeshVerts[i].Position[1]) + " ";
+            controlPointFile << to_string(ControlMeshVerts[i].Position[2]) + " ";
+            controlPointFile << to_string(ControlMeshVerts[i].Position[3]) << endl;
+        }
+
+        for(int i = 0; i < 441; i++) {
+            controlPointFile << "f ";
+            controlPointFile << to_string(ControlMeshIdcsForTex[6 * i]) + " ";
+            controlPointFile << to_string(ControlMeshIdcsForTex[6 * i + 1]) + " ";
+            controlPointFile << to_string(ControlMeshIdcsForTex[6 * i + 2]) + " ";
+            controlPointFile << to_string(ControlMeshIdcsForTex[6 * i + 3]) + " ";
+            controlPointFile << to_string(ControlMeshIdcsForTex[6 * i + 4]) + " ";
+            controlPointFile << to_string(ControlMeshIdcsForTex[6 * i + 5]) << endl;
+        }
+        cout << "Control points written to /home/sayak/controlPoints.obj" << endl;
+    } else {
+        cout << "Unable to open control point file." << endl;
+    }
+    controlPointFile.close();
 }
 
 int main(void)

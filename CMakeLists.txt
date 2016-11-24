@@ -543,18 +543,15 @@ add_executable(misc05_picking_slow_easy
 	common/vboindexer.hpp
         common/tessshader.cpp
         common/tessshader.hpp
-        misc05_picking/tga.c
-        misc05_picking/tga.h
-        misc05_picking/ray_casting.h
 
 	misc05_picking/StandardShading.vertexshader
 	misc05_picking/StandardShading.fragmentshader
 	misc05_picking/Picking.vertexshader
 	misc05_picking/Picking.fragmentshader
-	#misc05_picking/BezierCurve.evalshader
-		#misc05_picking/BezierCurve.tessshader
-		#misc05_picking/BezierCurve.vertexshader
-		#misc05_picking/BezierCurve.fragmentshader
+	misc05_picking/BezierCurve.evalshader
+        misc05_picking/BezierCurve.tessshader
+        misc05_picking/BezierCurve.vertexshader
+        misc05_picking/BezierCurve.fragmentshader
 )
 target_link_libraries(misc05_picking_slow_easy
 	${ALL_LIBS}
