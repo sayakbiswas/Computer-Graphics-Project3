@@ -29,6 +29,7 @@ using namespace std;
 #include <iterator>
 
 #include "tga.h"
+#include "ray_casting.h"
 
 const int window_width = 600, window_height = 600;
 
@@ -94,8 +95,10 @@ void saveControlPoints(void);
 void loadControlPoints(void);
 vec3 findClosestPoint(vec3, vec3, vec3, double);
 bool rayTest(vec3, vec3, vec3, vec3, double, double);
-bool rayTestPoints(vec3, vec3, unsigned int*, double*, double);
+bool rayTestPoints(Vertex*, vec3, vec3, unsigned int*, double*, double);
 void subdivideControlMesh(void);
+void move_vertex(void);
+void automate_ray(int);
 
 // GLOBAL VARIABLES
 GLFWwindow* window;
@@ -139,6 +142,8 @@ GLfloat cameraAnglePhi = asin(1/sqrt(3));
 GLfloat cameraSphereRadius = sqrt(675);
 Vertex* Face_Verts;
 GLushort* Face_Idcs;
+Vertex* hair_Verts;
+GLushort* hair_Idcs;
 Vertex ControlMeshVerts[441];
 GLushort ControlMeshIdcs[1764];
 GLushort ControlMeshIdcsForTex[2646];
@@ -157,6 +162,7 @@ unsigned int id;
 double proj;
 float colorRed[] = {1.0f, 0.0f, 0.0f, 1.0f};
 float controlMeshNormal[] = {0.0f, 0.0f, 1.0f};
+glm::mat4 ModelMatrix;
 
 bool moveCameraLeft = false;
 bool moveCameraRight = false;
@@ -238,7 +244,7 @@ void createObjects(void)
     k = 0;
     for(int i = -10; i <= 10; i++) {
         for(int j = 0; j <= 20; j++) {
-            ControlMeshVerts[21 * k + j] = {{i, j, 5, 1.0}, {0.0, 1.0, 0.0, 1.0}, {0.0, 0.0, 1.0}};
+            ControlMeshVerts[21 * k + j] = {{i, j, -5.0, 1.0}, {0.0, 1.0, 0.0, 1.0}, {0.0, 0.0, 1.0}};
         }
         cout << k << endl;
         k++;
@@ -308,6 +314,9 @@ void createObjects(void)
 	//GLushort* Idcs;
     loadObject("biswas_sayak.obj", glm::vec4(1.0, 0.0, 0.0, 1.0), Face_Verts, Face_Idcs, 4);
     createVAOs(Face_Verts, Face_Idcs, 4);
+
+    loadObject("hair.obj", glm::vec4(1.0, 0.0, 0.0, 1.0), hair_Verts, hair_Idcs, 7);
+    createVAOs(hair_Verts, hair_Idcs, 7);
 }
 
 void renderScene(void)
@@ -427,7 +436,7 @@ void pickObject(void)
 
 	glUseProgram(pickingProgramID);
 	{
-		glm::mat4 ModelMatrix = glm::mat4(1.0); // TranslationMatrix * RotationMatrix;
+        ModelMatrix = glm::mat4(1.0); // TranslationMatrix * RotationMatrix;
 		glm::mat4 MVP = gProjectionMatrix * gViewMatrix * ModelMatrix;
 
 		// Send our transformation to the currently bound shader, in the "MVP" uniform
@@ -453,17 +462,22 @@ void pickObject(void)
 	// because the framebuffer is on the GPU.
 	double xpos, ypos;
 	glfwGetCursorPos(window, &xpos, &ypos);
-	unsigned char data[4];
-	glReadPixels(xpos, window_height - ypos, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, data); // OpenGL renders with (0,0) on bottom, mouse reports with (0,0) on top
+
+    GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
-    glm::mat4 ModelMatrix = glm::mat4(1.0); // TranslationMatrix * RotationMatrix;
-    startMousePos = glm::unProject(glm::vec3(xpos, ypos, 0.0f), ModelMatrix, gProjectionMatrix, vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
-    endMousePos = glm::unProject(glm::vec3(xpos, ypos, 1.0f), ModelMatrix, gProjectionMatrix, vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
-    cout << "startMousePos " << startMousePos.x << " " << startMousePos.y << " " << startMousePos.z << endl;
-    cout << "endMousePos " << endMousePos.x << " " << endMousePos.y << " " << endMousePos.z << endl;
-    double epsilon = 0.5;
-    cout << "raytest " << rayTestPoints(startMousePos, endMousePos, &id, &proj, epsilon) << endl;
-    cout << "id " << id << endl;
+    mat4 nModelMatrix = gViewMatrix * ModelMatrix;
+
+	unsigned char data[4];
+    GLfloat zpos;
+
+	glReadPixels(xpos, window_height - ypos, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, data); // OpenGL renders with (0,0) on bottom, mouse reports with (0,0) on top
+
+    startMousePos = glm::unProject(glm::vec3(xpos, window_height - ypos, 0.0f), nModelMatrix, gProjectionMatrix, vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+    endMousePos = glm::unProject(glm::vec3(xpos, window_height - ypos, 1.0f), nModelMatrix, gProjectionMatrix, vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+    double epsilon = 0.1;
+    double proj;
+    bool found = rayTestPoints(ControlMeshVerts, startMousePos, endMousePos, &id, &proj, epsilon);
+    cout << "id: " << id << endl;
 
 	// Convert the color back to an integer ID
 	gPickedIndex = int(data[0]);
@@ -482,6 +496,44 @@ void pickObject(void)
 	//continue; // skips the normal rendering
 }
 
+void move_vertex() {
+
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glm::vec4 vp = glm::vec4(viewport[0], viewport[1], viewport[2], viewport[3]);
+
+    double xpos, ypos;
+    glfwGetCursorPos(window, &xpos, &ypos);
+    mat4 nModelMatrix = gViewMatrix * ModelMatrix;
+
+
+    int state = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+    vec3 W;
+    if (state == GLFW_PRESS) {
+        cout << "When pressed" << W.z << endl;
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+            vec3 p = glm::project(glm::vec3(ControlMeshVerts[id].Position[0], ControlMeshVerts[id].Position[1], ControlMeshVerts[id].Position[2]), nModelMatrix, gProjectionMatrix, glm::vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+            W = glm::unProject(glm::vec3(xpos, window_height - ypos, p.z), nModelMatrix, gProjectionMatrix, glm::vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+            float coords[3] = { W.x, W.y, W.z };
+            ControlMeshVerts[id].SetPosition(coords);
+        }
+        else {
+            vec3 p = glm::project(glm::vec3(ControlMeshVerts[id].Position[0], ControlMeshVerts[id].Position[1], ControlMeshVerts[id].Position[2]), nModelMatrix, gProjectionMatrix, glm::vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+            W = glm::unProject(glm::vec3(xpos, window_height - ypos, p.z), nModelMatrix, gProjectionMatrix, glm::vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+            float coords[3] = { W.x, W.y, ControlMeshVerts[id].Position[2] };
+            ControlMeshVerts[id].SetPosition(coords);
+        }
+    }
+
+    VertexBufferSize[2] = sizeof(ControlMeshVerts);
+    IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+    createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+    VertexBufferSize[3] = sizeof(ControlMeshVerts);
+    IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+    createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
+}
+
 vec3 findClosestPoint(vec3 rayStartPos, vec3 rayEndPos, vec3 pointPos, double *proj) {
     vec3 rayVector = rayEndPos - rayStartPos;
     double raySquared = glm::dot(rayVector, rayVector);
@@ -494,25 +546,25 @@ vec3 findClosestPoint(vec3 rayStartPos, vec3 rayEndPos, vec3 pointPos, double *p
 
 bool rayTest(vec3 pointPos, vec3 startPos, vec3 endPos, vec3 *closestPoint, double *proj, double epsilon) {
     *closestPoint = findClosestPoint(startPos, endPos, pointPos, proj);
-    cout << "closestPoint " << closestPoint->x << " " << closestPoint->y << " " << closestPoint->z << endl;
+    //cout << "closestPoint " << closestPoint->x << " " << closestPoint->y << " " << closestPoint->z << endl;
     double len = glm::distance2(*closestPoint, pointPos);
-    cout << "len " << len << endl;
+    //cout << "len " << len << endl;
     return len < epsilon;
 }
 
-bool rayTestPoints(vec3 start, vec3 end, unsigned int *id, double *proj, double epsilon) {
+bool rayTestPoints(Vertex* vert, vec3 start, vec3 end, unsigned int *id, double *proj, double epsilon) {
     unsigned int pointID = 442;
     bool foundCollision = false;
     double minDistToStart = 10000000.0;
     double distance;
     vec3 point;
     for (unsigned int i = 0; i < 441; ++i) {
-        cout << "i " << i << endl;
-        vec3 pointPos = glm::vec3(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+        //cout << "i " << i << endl;
+        vec3 pointPos = glm::vec3(vert[i].Position[0], vert[i].Position[1], vert[i].Position[2]);
         if (rayTest(pointPos, start, end, &point, proj, epsilon)) {
             distance = glm::distance2(start, point);
-            cout << "distance " << distance << endl;
-            cout << "pointPos " << pointPos.x << " " << pointPos.y << " " << pointPos.z << endl;
+            //cout << "distance " << distance << endl;
+            //cout << "pointPos " << pointPos.x << " " << pointPos.y << " " << pointPos.z << endl;
             if (distance < minDistToStart)
             {
                 minDistToStart = distance;
@@ -524,6 +576,43 @@ bool rayTestPoints(vec3 start, vec3 end, unsigned int *id, double *proj, double 
 
     *id = pointID;
     return foundCollision;
+}
+
+void automate_ray(int j) {
+    float cg[3];
+    for(int j=0;j<441;j++)
+    {
+        for (int i = NumIndices[4] - 1; i > 0; i = i - 3) {
+            if (/*Face_Verts[Face_Idcs[i]].Position[0]< ControlMeshVerts[j].Position[0] + 0.5f && Face_Verts[Face_Idcs[i]].Position[0]> ControlMeshVerts[j].Position[0] - 0.5f && Face_Verts[Face_Idcs[i]].Position[1]< ControlMeshVerts[j].Position[1] + 0.5f && Face_Verts[Face_Idcs[i]].Position[1]> ControlMeshVerts[j].Position[1] - 0.5f &&*/ Face_Verts[Face_Idcs[i]].Position[2] < 3.0f) {
+                const float v1[3] = { Face_Verts[Face_Idcs[i]].Position[0] ,Face_Verts[Face_Idcs[i]].Position[1],Face_Verts[Face_Idcs[i]].Position[2] };
+                const float v2[3] = { Face_Verts[Face_Idcs[i + 1]].Position[0] ,Face_Verts[Face_Idcs[i + 1]].Position[1],Face_Verts[Face_Idcs[i + 1]].Position[2] };
+                const float v3[3] = { Face_Verts[Face_Idcs[i + 2]].Position[0] ,Face_Verts[Face_Idcs[i + 2]].Position[1],Face_Verts[Face_Idcs[i + 2]].Position[2] };
+                const float p[3] = { ControlMeshVerts[j].Position[0] ,ControlMeshVerts[j].Position[1],ControlMeshVerts[j].Position[2] };
+                const float dir[3] = { 0,0,1 };
+                ray_cast(v1, v2, v3, p, dir, cg);
+                cout << "barycentric-"<<j<<":" << cg[0] << " " << cg[1] << " " << cg[2] << endl;
+                if (cg[0] >= 0 && cg[1] >= 0 && cg[2] >= 0)
+                {
+                    float newval[3] = { ControlMeshVerts[j].Position[0],ControlMeshVerts[j].Position[1],Face_Verts[Face_Idcs[i]].Position[2] - 0.5f };
+                    ControlMeshVerts[j].SetPosition(newval);
+                    //vGridVertices[j].Position[2] = Face_Verts[Face_Idcs[i]].Position[2];
+                    //if(vGridVertices[j].Position[2]< (-1.0f))
+                    break;
+                } else {
+                    float newval[3] = { ControlMeshVerts[j].Position[0],ControlMeshVerts[j].Position[1], 4.0f };
+                    ControlMeshVerts[j].SetPosition(newval);
+                }
+            } else {
+                float newval[3] = { ControlMeshVerts[j].Position[0],ControlMeshVerts[j].Position[1], 4.0f };
+                ControlMeshVerts[j].SetPosition(newval);
+            }
+        }
+        VertexBufferSize[2] = sizeof(ControlMeshVerts);
+        IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+        createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+    }
+
+    cout << "barycentric:" << cg[0] << " " << cg[1] << " " << cg[2] << endl;
 }
 
 int initWindow(void)
@@ -798,6 +887,9 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
         case GLFW_KEY_S:
             saveControlPoints();
             break;
+        case GLFW_KEY_Z:
+            automate_ray(id);
+            break;
         case GLFW_KEY_LEFT:
             moveCameraLeft = false;
             break;
@@ -895,6 +987,13 @@ void loadControlPoints() {
         cout << "Unable to open control point file." << endl;
     }
     controlPointFile.close();
+    VertexBufferSize[2] = sizeof(ControlMeshVerts);
+    IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+    createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+    VertexBufferSize[3] = sizeof(ControlMeshVerts);
+    IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+    createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
 }
 
 void subdivideControlMesh() {
@@ -1270,8 +1369,8 @@ void subdivideControlMesh() {
             ControlMeshSubdivIdcsForTex[6 * i + 5] = i;
         }
 
-        /*uvSubdiv[2 * i] = (ControlMeshSubdivVerts[i].Position[0] + 10) / 20;
-        uvSubdiv[2 * i + 1] = (ControlMeshSubdivVerts[i].Position[1]) / 20;*/
+        /*uvSubdiv[2 * i] = (ControlMeshSubdivVerts[i].Position[0] + 10) / 60;
+        uvSubdiv[2 * i + 1] = (ControlMeshSubdivVerts[i].Position[1]) / 60;*/
     }
 
     for(int i = 0; i < 7441; i+=2) {
@@ -1317,6 +1416,9 @@ int main(void)
 				phi -= 360;
 		}
 
+        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
+            move_vertex();
+        }
 		// DRAWING POINTS
 		renderScene();
 
