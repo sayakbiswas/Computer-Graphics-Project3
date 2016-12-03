@@ -26,6 +26,7 @@ using namespace glm;
 #include <iostream>
 using namespace std;
 #include <fstream>
+#include <iterator>
 
 #include "tga.h"
 
@@ -54,6 +55,28 @@ typedef struct Vertex {
 	}
 };
 
+typedef struct point {
+    float x, y, z;
+    point(const float x = 0, const float y = 0, const float z = 0) : x(x), y(y), z(z) {}
+    point(float *coords) : x(coords[0]), y(coords[1]), z(coords[2]) {}
+    point operator -(const point& a)const {
+        return point(x - a.x, y - a.y, z - a.z);
+    }
+    point operator +(const point& a)const {
+        return point(x + a.x, y + a.y, z + a.z);
+    }
+    point operator *(const float& a)const {
+        return point(x*a, y*a, z*a);
+    }
+    point operator /(const float& a)const {
+        return point(x / a, y / a, z / a);
+    }
+    float* toArray() {
+        float array[] = { x, y, z, 1.0f };
+        return array;
+    }
+};
+
 // function prototypes
 int initWindow(void);
 void initOpenGL(void);
@@ -68,6 +91,11 @@ static void mouseCallback(GLFWwindow*, int, int, int);
 void resetScene(void);
 void createVAOsForTex(Vertex[], GLushort[], int);
 void saveControlPoints(void);
+void loadControlPoints(void);
+vec3 findClosestPoint(vec3, vec3, vec3, double);
+bool rayTest(vec3, vec3, vec3, vec3, double, double);
+bool rayTestPoints(vec3, vec3, unsigned int*, double*, double);
+void subdivideControlMesh(void);
 
 // GLOBAL VARIABLES
 GLFWwindow* window;
@@ -114,10 +142,19 @@ GLushort* Face_Idcs;
 Vertex ControlMeshVerts[441];
 GLushort ControlMeshIdcs[1764];
 GLushort ControlMeshIdcsForTex[2646];
+Vertex ControlMeshSubdivVerts[3721] = {0.0f};
+GLushort ControlMeshSubdivIdcs[14884];
 long image_width;
 long image_height;
 GLuint texID;
 GLfloat uv[882];
+GLint viewport[4];
+vec3 startMousePos;
+vec3 endMousePos;
+unsigned int id;
+double proj;
+float colorRed[] = {1.0f, 0.0f, 0.0f, 1.0f};
+float controlMeshNormal[] = {0.0f, 0.0f, 1.0f};
 
 bool moveCameraLeft = false;
 bool moveCameraRight = false;
@@ -126,6 +163,7 @@ bool moveCameraDown = false;
 bool shouldResetScene = false;
 bool shouldDisplayFaceMesh = false;
 bool shouldDisplayControlMesh = false;
+bool shouldSubdivideControlMesh = false;
 
 void loadObject(char* file, glm::vec4 color, Vertex * &out_Vertices, GLushort* &out_Indices, int ObjectId)
 {
@@ -211,6 +249,7 @@ void createObjects(void)
     glm::vec3 v = glm::cross(n, u);*/
 
     for(int i = 0; i < 441; i++) {
+        cout << "i " << i << " " << ControlMeshVerts[i].Position[0] << " " << ControlMeshVerts[i].Position[1] << " " << ControlMeshVerts[i].Position[2] << endl;
         /*GLfloat u_coord = glm::dot(u,
                                    glm::vec3(ControlMeshVerts[i].Position[0],
                                     ControlMeshVerts[i].Position[1],
@@ -263,8 +302,6 @@ void createObjects(void)
 	//GLushort* Idcs;
     loadObject("biswas_sayak.obj", glm::vec4(1.0, 0.0, 0.0, 1.0), Face_Verts, Face_Idcs, 4);
     createVAOs(Face_Verts, Face_Idcs, 4);
-
-
 }
 
 void renderScene(void)
@@ -298,7 +335,7 @@ void renderScene(void)
         float camY = cameraSphereRadius * sin(cameraAnglePhi);
         float camZ = cameraSphereRadius * cos(cameraAnglePhi) * cos(cameraAngleTheta);
         gViewMatrix = glm::lookAt(glm::vec3(camX, camY, camZ),	// eye
-            glm::vec3(0.0, 0.0, 0.0),	// center
+            glm::vec3(0.0, 10.0, 0.0),	// center
             glm::vec3(0.0, 1.0, 0.0));	// up
     }
 
@@ -324,12 +361,21 @@ void renderScene(void)
             glBindVertexArray(VertexArrayId[2]);
             glDrawArrays(GL_POINTS, 0, 441);
             //glPolygonMode(GL_FRONT_AND_BACK,GL_LINE);
-            glDrawElements(GL_LINES, 1746, GL_UNSIGNED_SHORT, (GLvoid*)0);
+            glDrawElements(GL_LINES, 1764, GL_UNSIGNED_SHORT, (GLvoid*)0);
         }
 
         if(shouldDisplayFaceMesh) {
             glBindVertexArray(VertexArrayId[4]);
             glDrawElements(GL_TRIANGLES, NumIndices[4], GL_UNSIGNED_SHORT, (void*)0);
+        }
+
+        if(shouldSubdivideControlMesh) {
+            glDisable(GL_PROGRAM_POINT_SIZE);
+            glEnable(GL_POINT_SIZE);
+            glPointSize(4.0f);
+            glBindVertexArray(VertexArrayId[5]);
+            glDrawArrays(GL_POINTS, 0, 3721);
+            glDrawElements(GL_LINES, 14884, GL_UNSIGNED_SHORT, (GLvoid*)0);
         }
 			
 		glBindVertexArray(0);
@@ -358,7 +404,7 @@ void renderScene(void)
 
     glUseProgram(0);
 	// Draw GUI
-	TwDraw();
+    //TwDraw();
 
 	// Swap buffers
 	glfwSwapBuffers(window);
@@ -401,6 +447,15 @@ void pickObject(void)
 	glfwGetCursorPos(window, &xpos, &ypos);
 	unsigned char data[4];
 	glReadPixels(xpos, window_height - ypos, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, data); // OpenGL renders with (0,0) on bottom, mouse reports with (0,0) on top
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glm::mat4 ModelMatrix = glm::mat4(1.0); // TranslationMatrix * RotationMatrix;
+    startMousePos = glm::unProject(glm::vec3(xpos, ypos, 0.0f), ModelMatrix, gProjectionMatrix, vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+    endMousePos = glm::unProject(glm::vec3(xpos, ypos, 1.0f), ModelMatrix, gProjectionMatrix, vec4(viewport[0], viewport[1], viewport[2], viewport[3]));
+    cout << "startMousePos " << startMousePos.x << " " << startMousePos.y << " " << startMousePos.z << endl;
+    cout << "endMousePos " << endMousePos.x << " " << endMousePos.y << " " << endMousePos.z << endl;
+    double epsilon = 0.5;
+    cout << "raytest " << rayTestPoints(startMousePos, endMousePos, &id, &proj, epsilon) << endl;
+    cout << "id " << id << endl;
 
 	// Convert the color back to an integer ID
 	gPickedIndex = int(data[0]);
@@ -417,6 +472,50 @@ void pickObject(void)
 	// Uncomment these lines to see the picking shader in effect
 	//glfwSwapBuffers(window);
 	//continue; // skips the normal rendering
+}
+
+vec3 findClosestPoint(vec3 rayStartPos, vec3 rayEndPos, vec3 pointPos, double *proj) {
+    vec3 rayVector = rayEndPos - rayStartPos;
+    double raySquared = glm::dot(rayVector, rayVector);
+    vec3 projection = pointPos - rayStartPos;
+    double projectionVal = glm::dot(projection, rayVector);
+    *proj = projectionVal / raySquared;
+    vec3 closestPoint = rayStartPos + glm::vec3(rayVector.x * (*proj), rayVector.y * (*proj), rayVector.z * (*proj)) ;
+    return closestPoint;
+}
+
+bool rayTest(vec3 pointPos, vec3 startPos, vec3 endPos, vec3 *closestPoint, double *proj, double epsilon) {
+    *closestPoint = findClosestPoint(startPos, endPos, pointPos, proj);
+    cout << "closestPoint " << closestPoint->x << " " << closestPoint->y << " " << closestPoint->z << endl;
+    double len = glm::distance2(*closestPoint, pointPos);
+    cout << "len " << len << endl;
+    return len < epsilon;
+}
+
+bool rayTestPoints(vec3 start, vec3 end, unsigned int *id, double *proj, double epsilon) {
+    unsigned int pointID = 442;
+    bool foundCollision = false;
+    double minDistToStart = 10000000.0;
+    double distance;
+    vec3 point;
+    for (unsigned int i = 0; i < 441; ++i) {
+        cout << "i " << i << endl;
+        vec3 pointPos = glm::vec3(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+        if (rayTest(pointPos, start, end, &point, proj, epsilon)) {
+            distance = glm::distance2(start, point);
+            cout << "distance " << distance << endl;
+            cout << "pointPos " << pointPos.x << " " << pointPos.y << " " << pointPos.z << endl;
+            if (distance < minDistToStart)
+            {
+                minDistToStart = distance;
+                pointID = i;
+                foundCollision = true;
+            }
+        }
+    }
+
+    *id = pointID;
+    return foundCollision;
 }
 
 int initWindow(void)
@@ -450,11 +549,11 @@ int initWindow(void)
 	}
 
 	// Initialize the GUI
-	TwInit(TW_OPENGL_CORE, NULL);
+    TwInit(TW_OPENGL_CORE, NULL);
 	TwWindowSize(window_width, window_height);
 	TwBar * GUI = TwNewBar("Picking");
 	TwSetParam(GUI, NULL, "refresh", TW_PARAM_CSTRING, 1, "0.1");
-	TwAddVarRW(GUI, "Last picked object", TW_TYPE_STDSTRING, &gMessage, NULL);
+    TwAddVarRW(GUI, "Last picked object", TW_TYPE_STDSTRING, &gMessage, NULL);
 
 	// Set up inputs
 	glfwSetCursorPos(window, window_width / 2, window_height / 2);
@@ -475,13 +574,13 @@ void initOpenGL(void)
 	glEnable(GL_CULL_FACE);
 
 	// Projection matrix : 45° Field of View, 4:3 ratio, display range : 0.1 unit <-> 100 units
-	gProjectionMatrix = glm::perspective(45.0f, 4.0f / 3.0f, 0.1f, 100.0f);
+    gProjectionMatrix = glm::perspective(45.0f, 4.0f / 3.0f, 0.1f, 100.0f);
 	// Or, for an ortho camera :
-	//gProjectionMatrix = glm::ortho(-4.0f, 4.0f, -3.0f, 3.0f, 0.0f, 100.0f); // In world coordinates
+    //gProjectionMatrix = glm::ortho(-4.0f, 4.0f, -3.0f, 3.0f, 0.0f, 100.0f); // In world coordinates
 
 	// Camera matrix
     gViewMatrix = glm::lookAt(glm::vec3(15.0, 15.0, 15.0f),	// eye
-		glm::vec3(0.0, 0.0, 0.0),	// center
+        glm::vec3(0.0, 10.0, 0.0),	// center
 		glm::vec3(0.0, 1.0, 0.0));	// up
 
 	// Create and compile our GLSL program from the shaders
@@ -654,6 +753,10 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
 		}
     } else if(action == GLFW_RELEASE) {
         switch (key) {
+        case GLFW_KEY_A:
+            shouldSubdivideControlMesh = true;
+            subdivideControlMesh();
+            break;
         case GLFW_KEY_C:
             if(shouldDisplayControlMesh) {
                 shouldDisplayControlMesh = false;
@@ -667,6 +770,9 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
             } else {
                 shouldDisplayFaceMesh = true;
             }
+            break;
+        case GLFW_KEY_L:
+            loadControlPoints();
             break;
         case GLFW_KEY_R:
             shouldResetScene = false;
@@ -707,7 +813,7 @@ void resetScene(void) {
 void saveControlPoints() {
     cout << "Writing Control Point file ..." << endl;
     ofstream controlPointFile;
-    controlPointFile.open("/home/sayak/controlPoints.obj", ios::out);
+    controlPointFile.open("cm.p3", ios::out);
     if(controlPointFile.is_open()) {
         for(int i = 0; i < 441; i++) {
             controlPointFile << "v ";
@@ -726,11 +832,270 @@ void saveControlPoints() {
             controlPointFile << to_string(ControlMeshIdcsForTex[6 * i + 4]) + " ";
             controlPointFile << to_string(ControlMeshIdcsForTex[6 * i + 5]) << endl;
         }
-        cout << "Control points written to /home/sayak/controlPoints.obj" << endl;
+        cout << "Control points written to cm.p3" << endl;
     } else {
         cout << "Unable to open control point file." << endl;
     }
     controlPointFile.close();
+}
+
+void loadControlPoints() {
+    cout << "Loading Control Point file ..." << endl;
+    ifstream controlPointFile;
+    controlPointFile.open("cm.p3", ios::in);
+    if(controlPointFile.is_open()) {
+        int vert_idx = 0;
+        int idcs_idx = 0;
+        while(controlPointFile) {
+            string line;
+            getline(controlPointFile, line);
+            if(!line.empty()) {
+                istringstream input_string_stream(line);
+                vector<string> tokens {istream_iterator<string>{input_string_stream},
+                                      istream_iterator<string>{}};
+                if(tokens.at(0).compare("v") == 0) {
+                    ControlMeshVerts[vert_idx].Position[0] = atof(tokens.at(1).c_str());
+                    ControlMeshVerts[vert_idx].Position[1] = atof(tokens.at(2).c_str());
+                    ControlMeshVerts[vert_idx].Position[2] = atof(tokens.at(3).c_str());
+                    ControlMeshVerts[vert_idx].Position[3] = atof(tokens.at(4).c_str());
+                    vert_idx++;
+                }
+
+                if(tokens.at(0).compare("f") == 0) {
+                    ControlMeshIdcsForTex[6 * idcs_idx] = atoi(tokens.at(1).c_str());
+                    ControlMeshIdcsForTex[6 * idcs_idx + 1] = atoi(tokens.at(2).c_str());
+                    ControlMeshIdcsForTex[6 * idcs_idx + 2] = atoi(tokens.at(3).c_str());
+                    ControlMeshIdcsForTex[6 * idcs_idx + 3] = atoi(tokens.at(4).c_str());
+                    ControlMeshIdcsForTex[6 * idcs_idx + 4] = atoi(tokens.at(5).c_str());
+                    ControlMeshIdcsForTex[6 * idcs_idx + 5] = atoi(tokens.at(6).c_str());
+                    idcs_idx++;
+                }
+            }
+        }
+        cout << "Control Points loaded from cm.p3" << endl;
+    } else {
+        cout << "Unable to open control point file." << endl;
+    }
+    controlPointFile.close();
+}
+
+void subdivideControlMesh() {
+    int j = 0;
+    for(int i = 0; i < 441; i++) {
+        //cout << "i " << i <<" j " << j << endl;
+        point *s00, *s01, *s02, *s10, *s11, *s12, *s20, *s21, *s22;
+        if(i < 21) {
+            //cout << "in left only" << endl;
+            s00 = new point(ControlMeshVerts[i].Position[0] - 1, ControlMeshVerts[i].Position[1] - 1, ControlMeshVerts[i].Position[2]);
+            s01 = new point(ControlMeshVerts[i].Position[0] - 1, ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+            s02 = new point(ControlMeshVerts[i].Position[0] - 1, ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+            if(i == 0) {
+                s10 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1] - 1, ControlMeshVerts[i].Position[2]);
+            } else {
+                s10 = new point(ControlMeshVerts[i - 1].Position[0], ControlMeshVerts[i - 1].Position[1], ControlMeshVerts[i - 1].Position[2]);
+            }
+            s11 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+            if(i == 20) {
+                s12 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+            } else {
+                s12 = new point(ControlMeshVerts[i + 1].Position[0], ControlMeshVerts[i + 1].Position[1], ControlMeshVerts[i + 1].Position[2]);
+            }
+            if(i == 0) {
+                s20 = new point(ControlMeshVerts[i].Position[0] + 1, ControlMeshVerts[i].Position[1] - 1, ControlMeshVerts[i].Position[2]);
+            } else {
+                s20 = new point(ControlMeshVerts[i + 20].Position[0], ControlMeshVerts[i + 20].Position[1], ControlMeshVerts[i + 20].Position[2]);
+            }
+            s21 = new point(ControlMeshVerts[i + 21].Position[0], ControlMeshVerts[i + 21].Position[1], ControlMeshVerts[i + 21].Position[2]);
+            if(i == 20) {
+                s22 = new point(ControlMeshVerts[i].Position[0] + 1, ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+            } else {
+                s22 = new point(ControlMeshVerts[i + 22].Position[0], ControlMeshVerts[i + 22].Position[1], ControlMeshVerts[i + 22].Position[2]);
+            }
+
+        } else if((i + 1) % 21 == 0 && i > 21 && i < 420) {
+            //cout << "in top only" << endl;
+            s00 = new point(ControlMeshVerts[i - 22].Position[0], ControlMeshVerts[i - 22].Position[1], ControlMeshVerts[i - 22].Position[2]);
+            s01 = new point(ControlMeshVerts[i - 21].Position[0], ControlMeshVerts[i - 21].Position[1], ControlMeshVerts[i - 21].Position[2]);
+            s02 = new point(ControlMeshVerts[i].Position[0] - 1, ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+            s10 = new point(ControlMeshVerts[i - 1].Position[0], ControlMeshVerts[i - 1].Position[1], ControlMeshVerts[i - 1].Position[2]);
+            s11 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+            s12 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+            s20 = new point(ControlMeshVerts[i + 20].Position[0], ControlMeshVerts[i + 20].Position[1], ControlMeshVerts[i + 20].Position[2]);
+            s21 = new point(ControlMeshVerts[i + 21].Position[0], ControlMeshVerts[i + 21].Position[1], ControlMeshVerts[i + 21].Position[2]);
+            s22 = new point(ControlMeshVerts[i].Position[0] + 1, ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+        } else if(i > 420 && ((i + 1) % 21 != 0 || i == 440)) {
+            //cout << "in right only" << endl;
+            s00 = new point(ControlMeshVerts[i - 22].Position[0], ControlMeshVerts[i - 22].Position[1], ControlMeshVerts[i - 22].Position[2]);
+            s01 = new point(ControlMeshVerts[i - 21].Position[0], ControlMeshVerts[i - 21].Position[1], ControlMeshVerts[i - 21].Position[2]);
+            if(i == 440) {
+                s02 = new point(ControlMeshVerts[i].Position[0] - 1, ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+            } else {
+                s02 = new point(ControlMeshVerts[i - 20].Position[0], ControlMeshVerts[i - 20].Position[1], ControlMeshVerts[i - 20].Position[2]);
+            }
+            s10 = new point(ControlMeshVerts[i - 1].Position[0], ControlMeshVerts[i - 1].Position[1], ControlMeshVerts[i - 1].Position[2]);
+            s11 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+            if(i == 440) {
+                s12 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+            } else {
+                s12 = new point(ControlMeshVerts[i + 1].Position[0], ControlMeshVerts[i + 1].Position[1], ControlMeshVerts[i + 1].Position[2]);
+            }
+            s20 = new point(ControlMeshVerts[i].Position[0] + 1, ControlMeshVerts[i].Position[1] - 1, ControlMeshVerts[i].Position[2]);
+            s21 = new point(ControlMeshVerts[i].Position[0] + 1, ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+            s22 = new point(ControlMeshVerts[i].Position[0] + 1, ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+        } else if(i % 21 == 0 && i >= 21 && i <= 420) {
+            //cout << "in bottom only" << endl;
+            s00 = new point(ControlMeshVerts[i].Position[0] - 1, ControlMeshVerts[i].Position[1] - 1, ControlMeshVerts[i].Position[2]);
+            s01 = new point(ControlMeshVerts[i - 21].Position[0], ControlMeshVerts[i - 21].Position[1], ControlMeshVerts[i - 21].Position[2]);
+            s02 = new point(ControlMeshVerts[i - 20].Position[0], ControlMeshVerts[i - 20].Position[1], ControlMeshVerts[i - 20].Position[2]);
+            s10 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1] - 1, ControlMeshVerts[i].Position[2]);
+            s11 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+            s12 = new point(ControlMeshVerts[i + 1].Position[0], ControlMeshVerts[i + 1].Position[1], ControlMeshVerts[i + 1].Position[2]);
+            s20 = new point(ControlMeshVerts[i].Position[0] + 1, ControlMeshVerts[i].Position[1] - 1, ControlMeshVerts[i].Position[2]);
+            if(i == 420) {
+                s21 = new point(ControlMeshVerts[i].Position[0] + 1, ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+            } else {
+                s21 = new point(ControlMeshVerts[i + 21].Position[0], ControlMeshVerts[i + 21].Position[1], ControlMeshVerts[i + 21].Position[2]);
+            }
+            if(i == 420) {
+                s22 = new point(ControlMeshVerts[i].Position[0] + 1, ControlMeshVerts[i].Position[1] + 1, ControlMeshVerts[i].Position[2]);
+            } else {
+                s22 = new point(ControlMeshVerts[i + 22].Position[0], ControlMeshVerts[i + 22].Position[1], ControlMeshVerts[i + 22].Position[2]);
+            }
+        } else {
+            //cout << "in middle only" << endl;
+            s00 = new point(ControlMeshVerts[i - 22].Position[0], ControlMeshVerts[i - 22].Position[1], ControlMeshVerts[i - 22].Position[2]);
+            s01 = new point(ControlMeshVerts[i - 21].Position[0], ControlMeshVerts[i - 21].Position[1], ControlMeshVerts[i - 21].Position[2]);
+            s02 = new point(ControlMeshVerts[i - 20].Position[0], ControlMeshVerts[i - 20].Position[1], ControlMeshVerts[i - 20].Position[2]);
+            s10 = new point(ControlMeshVerts[i - 1].Position[0], ControlMeshVerts[i - 1].Position[1], ControlMeshVerts[i - 1].Position[2]);
+            s11 = new point(ControlMeshVerts[i].Position[0], ControlMeshVerts[i].Position[1], ControlMeshVerts[i].Position[2]);
+            s12 = new point(ControlMeshVerts[i + 1].Position[0], ControlMeshVerts[i + 1].Position[1], ControlMeshVerts[i + 1].Position[2]);
+            s20 = new point(ControlMeshVerts[i + 20].Position[0], ControlMeshVerts[i + 20].Position[1], ControlMeshVerts[i + 20].Position[2]);
+            s21 = new point(ControlMeshVerts[i + 21].Position[0], ControlMeshVerts[i + 21].Position[1], ControlMeshVerts[i + 21].Position[2]);
+            s22 = new point(ControlMeshVerts[i + 22].Position[0], ControlMeshVerts[i + 22].Position[1], ControlMeshVerts[i + 22].Position[2]);
+        }
+
+        point c00 = (*s11 * (float)(16.0f/36.0f)) + ((*s21 + *s12 + *s01 + *s10) * (float)(4.0f/36.0f)) + ((*s22 + *s02 + *s00 + *s20) * (float)(1.0f/36.0f));
+        point c01 = (*s11 * (float)(8.0f/18.0f)) + ((*s01 + *s21) * (float)(2.0f/18.0f)) + (*s12 * (float)(4.0f/18.0f)) + ((*s22 + *s02) * (float)(1.0f/18.0f));
+        point c02 = (*s12 * (float)(8.0f/18.0f)) + ((*s02 + *s22) * (float)(2.0f/18.0f)) + (*s11 * (float)(4.0f/18.0f)) + ((*s21 + *s01) * (float)(1.0f/18.0f));
+        point c10 = (*s11 * (float)(8.0f/18.0f)) + ((*s10 + *s12) * (float)(2.0f/18.0f)) + (*s21 * (float)(4.0f/18.0f)) + ((*s22 + *s20) * (float)(1.0f/18.0f));
+        point c11 = (*s11 * (float)(4.0f/9.0f)) + ((*s21 + *s12) * (float)(2.0f/9.0f)) + ((*s22) * (float)(1.0f/9.0f));
+        point c12 = (*s12 * (float)(4.0f/9.0f)) + ((*s11 + *s22) * (float)(2.0f/9.0f)) + (*s21 * (float)(1.0f/9.0f));
+        point c20 = (*s21 * (float)(8.0f/18.0f)) + ((*s20 + *s22) * (float)(2.0f/18.0f)) + (*s11 * (float)(4.0f/18.0f) + (*s12 + *s10) * (float)(1.0f/18.0f));
+        point c21 = (*s21 * (float)(4.0f/9.0f)) + ((*s11 + *s22) * (float)(2.0f/9.0f)) + (*s12 * (float)(1.0f/9.0f));
+        point c22 = (*s22 * (float)(4.0f/9.0f)) + ((*s11 + *s22) * (float)(2.0f/9.0f)) + (*s11 * (float)(1.0f/9.0f));
+
+        //cout << "s11 " << s11->x << " " << s11->y << " " << s11->z << endl;
+        //cout << "c00 " << c00.x << " " << c00.y << " " << c00.z << endl;
+
+        cout << "index 3 * j " << 3 * j << endl;
+        ControlMeshSubdivVerts[3 * j].Position[0] = c00.x;
+        ControlMeshSubdivVerts[3 * j].Position[1] = c00.y;
+        ControlMeshSubdivVerts[3 * j].Position[2] = s11->z;
+        ControlMeshSubdivVerts[3 * j].Position[3] = 1.0f;
+        ControlMeshSubdivVerts[3 * j].SetColor(colorRed);
+        ControlMeshSubdivVerts[3 * j].SetNormal(controlMeshNormal);
+
+        if((i + 1) % 21 != 0) {
+            cout << "index 3 * j +1 " << 3 * j + 1 << endl;
+            ControlMeshSubdivVerts[3 * j + 1].Position[0] = c01.x;
+            ControlMeshSubdivVerts[3 * j + 1].Position[1] = c01.y;
+            ControlMeshSubdivVerts[3 * j + 1].Position[2] = s11->z;
+            ControlMeshSubdivVerts[3 * j + 1].Position[3] = 1.0f;
+            ControlMeshSubdivVerts[3 * j + 1].SetColor(colorRed);
+            ControlMeshSubdivVerts[3 * j + 1].SetNormal(controlMeshNormal);
+
+            cout << "index 3 * j + 2 " << 3 * j + 2 << endl;
+            ControlMeshSubdivVerts[3 * j + 2].Position[0] = c02.x;
+            ControlMeshSubdivVerts[3 * j + 2].Position[1] = c02.y;
+            ControlMeshSubdivVerts[3 * j + 2].Position[2] = s11->z;
+            ControlMeshSubdivVerts[3 * j + 2].Position[3] = 1.0f;
+            ControlMeshSubdivVerts[3 * j + 2].SetColor(colorRed);
+            ControlMeshSubdivVerts[3 * j + 2].SetNormal(controlMeshNormal);
+        }
+
+        if(i < 420) {
+            cout << "index 3 * j + 61 " << 3 * j + 61 << endl;
+            ControlMeshSubdivVerts[3 * j + 61].Position[0] = c10.x;
+            ControlMeshSubdivVerts[3 * j + 61].Position[1] = c10.y;
+            ControlMeshSubdivVerts[3 * j + 61].Position[2] = s11->z;
+            ControlMeshSubdivVerts[3 * j + 61].Position[3] = 1.0f;
+            ControlMeshSubdivVerts[3 * j + 61].SetColor(colorRed);
+            ControlMeshSubdivVerts[3 * j + 61].SetNormal(controlMeshNormal);
+
+            if((i + 1) % 21 != 0) {
+                cout << "index 3 * j + 62 " << 3 * j + 62<< endl;
+                ControlMeshSubdivVerts[3 * j + 62].Position[0] = c11.x;
+                ControlMeshSubdivVerts[3 * j + 62].Position[1] = c11.y;
+                ControlMeshSubdivVerts[3 * j + 62].Position[2] = s11->z;
+                ControlMeshSubdivVerts[3 * j + 62].Position[3] = 1.0f;
+                ControlMeshSubdivVerts[3 * j + 62].SetColor(colorRed);
+                ControlMeshSubdivVerts[3 * j + 62].SetNormal(controlMeshNormal);
+
+                cout << "index 3 * j + 63 " << 3 * j + 63 << endl;
+                ControlMeshSubdivVerts[3 * j + 63].Position[0] = c12.x;
+                ControlMeshSubdivVerts[3 * j + 63].Position[1] = c12.y;
+                ControlMeshSubdivVerts[3 * j + 63].Position[2] = s11->z;
+                ControlMeshSubdivVerts[3 * j + 63].Position[3] = 1.0f;
+                ControlMeshSubdivVerts[3 * j + 63].SetColor(colorRed);
+                ControlMeshSubdivVerts[3 * j + 63].SetNormal(controlMeshNormal);
+            }
+
+            cout << "index 3 * j + 122 " << 3 * j + 122 << endl;
+            ControlMeshSubdivVerts[3 * j + 122].Position[0] = c20.x;
+            ControlMeshSubdivVerts[3 * j + 122].Position[1] = c20.y;
+            ControlMeshSubdivVerts[3 * j + 122].Position[2] = s11->z;
+            ControlMeshSubdivVerts[3 * j + 122].Position[3] = 1.0f;
+            ControlMeshSubdivVerts[3 * j + 122].SetColor(colorRed);
+            ControlMeshSubdivVerts[3 * j + 122].SetNormal(controlMeshNormal);
+
+            if((i + 1) % 21 != 0) {
+                cout << "index 3 * j + 123 " << 3 * j + 123 << endl;
+                ControlMeshSubdivVerts[3 * j + 123].Position[0] = c21.x;
+                ControlMeshSubdivVerts[3 * j + 123].Position[1] = c21.y;
+                ControlMeshSubdivVerts[3 * j + 123].Position[2] = s11->z;
+                ControlMeshSubdivVerts[3 * j + 123].Position[3] = 1.0f;
+                ControlMeshSubdivVerts[3 * j + 123].SetColor(colorRed);
+                ControlMeshSubdivVerts[3 * j + 123].SetNormal(controlMeshNormal);
+
+                cout << "index 3 * j + 124 " << 3 * j + 124 << endl;
+                ControlMeshSubdivVerts[3 * j + 124].Position[0] = c22.x;
+                ControlMeshSubdivVerts[3 * j + 124].Position[1] = c22.y;
+                ControlMeshSubdivVerts[3 * j + 124].Position[2] = s11->z;
+                ControlMeshSubdivVerts[3 * j + 124].Position[3] = 1.0f;
+                ControlMeshSubdivVerts[3 * j + 124].SetColor(colorRed);
+                ControlMeshSubdivVerts[3 * j + 124].SetNormal(controlMeshNormal);
+            }
+        }
+
+        if(i != 0 && (i + 1) % 21 == 0) {
+            cout << "i " << i << " j " << j << endl;
+            j = j + 41;
+        } else {
+            j++;
+        }
+    }
+
+    for(int i = 0; i < 3721; i++) {
+        cout << "ControlMeshsubdivVerts[" << i << "] " << ControlMeshSubdivVerts[i].Position[0] << " " << ControlMeshSubdivVerts[i].Position[1] << " " << ControlMeshSubdivVerts[i].Position[2] << endl;
+        if((i + 1) % 61 != 0 && i < 3660 && i != 3720) {
+            ControlMeshSubdivIdcs[4 * i] = i;
+            ControlMeshSubdivIdcs[4 * i + 1] = i + 1;
+        } else {
+            ControlMeshSubdivIdcs[4 * i] = i;
+            ControlMeshSubdivIdcs[4 * i + 1] = i;
+        }
+        if(i < 3660) {
+            ControlMeshSubdivIdcs[4 * i + 2] = i;
+            ControlMeshSubdivIdcs[4 * i + 3] = i + 61;
+        } else if(i != 3720) {
+            ControlMeshSubdivIdcs[4 * i + 2] = i;
+            ControlMeshSubdivIdcs[4 * i + 3] = i + 1;
+        }
+    }
+
+    VertexBufferSize[5] = sizeof(ControlMeshSubdivVerts);
+    IndexBufferSize[5] = sizeof(ControlMeshSubdivIdcs);
+    createVAOs(ControlMeshSubdivVerts, ControlMeshSubdivIdcs, 5);
 }
 
 int main(void)
