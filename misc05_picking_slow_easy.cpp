@@ -98,7 +98,8 @@ bool rayTest(vec3, vec3, vec3, vec3, double, double);
 bool rayTestPoints(Vertex*, vec3, vec3, unsigned int*, double*, double);
 void subdivideControlMesh(void);
 void move_vertex(void);
-void automate_ray(int);
+void automate_ray(int, int, float, float, float, float);
+void rotateRestGrid(void);
 
 // GLOBAL VARIABLES
 GLFWwindow* window;
@@ -129,6 +130,11 @@ GLuint ProjMatrixID;
 GLuint PickingMatrixID;
 GLuint pickingColorID;
 GLuint LightID;
+GLuint Light1ID;
+GLuint Light2ID;
+GLuint LightID_tex;
+GLuint Light1ID_tex;
+GLuint Light2ID_tex;
 GLuint TextureID;
 
 GLint gX = 0.0;
@@ -172,6 +178,14 @@ bool shouldResetScene = false;
 bool shouldDisplayFaceMesh = false;
 bool shouldDisplayControlMesh = false;
 bool shouldSubdivideControlMesh = false;
+bool shouldMoveControlPoint = false;
+bool shouldMoveControlPointBackward = false;
+bool shouldMoveControlPointForward = false;
+bool shouldMoveControlPointLeft = false;
+bool shouldMoveControlPointRight = false;
+bool shouldMoveControlPointUp = false;
+bool shouldMoveControlPointDown = false;
+bool shouldLoadHair = false;
 
 void loadObject(char* file, glm::vec4 color, Vertex * &out_Vertices, GLushort* &out_Indices, int ObjectId)
 {
@@ -312,10 +326,10 @@ void createObjects(void)
 	// ATTN: load your models here
 	//Vertex* Verts;
 	//GLushort* Idcs;
-    loadObject("biswas_sayak.obj", glm::vec4(1.0, 0.0, 0.0, 1.0), Face_Verts, Face_Idcs, 4);
+    loadObject("biswas_sayak_scaled.obj", glm::vec4(1.0, 1.0, 1.0, 1.0), Face_Verts, Face_Idcs, 4);
     createVAOs(Face_Verts, Face_Idcs, 4);
 
-    loadObject("hair.obj", glm::vec4(1.0, 0.0, 0.0, 1.0), hair_Verts, hair_Idcs, 7);
+    loadObject("hair.obj", glm::vec4(0.3, 0.5, 0.2, 1.0), hair_Verts, hair_Idcs, 7);
     createVAOs(hair_Verts, hair_Idcs, 7);
 }
 
@@ -329,19 +343,19 @@ void renderScene(void)
 	// Re-clear the screen for real rendering
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    if(moveCameraLeft) {
+    if(moveCameraLeft && !shouldMoveControlPoint) {
         cameraAngleTheta -= 0.01f;
     }
 
-    if(moveCameraRight) {
+    if(moveCameraRight && !shouldMoveControlPoint) {
         cameraAngleTheta += 0.01f;
     }
 
-    if(moveCameraUp) {
+    if(moveCameraUp && !shouldMoveControlPoint) {
         cameraAnglePhi -= 0.01f;
     }
 
-    if(moveCameraDown) {
+    if(moveCameraDown && !shouldMoveControlPoint) {
         cameraAnglePhi += 0.01f;
     }
 
@@ -354,11 +368,87 @@ void renderScene(void)
             glm::vec3(0.0, 1.0, 0.0));	// up
     }
 
+    if(shouldMoveControlPointBackward) {
+        float coords[] = {ControlMeshVerts[id].Position[0], ControlMeshVerts[id].Position[1], ControlMeshVerts[id].Position[2] + 0.01f};
+        ControlMeshVerts[id].SetPosition(coords);
+        VertexBufferSize[2] = sizeof(ControlMeshVerts);
+        IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+        createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+        VertexBufferSize[3] = sizeof(ControlMeshVerts);
+        IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+        createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
+    }
+
+    if(shouldMoveControlPointForward) {
+        float coords[] = {ControlMeshVerts[id].Position[0], ControlMeshVerts[id].Position[1], ControlMeshVerts[id].Position[2] - 0.01f};
+        ControlMeshVerts[id].SetPosition(coords);
+        VertexBufferSize[2] = sizeof(ControlMeshVerts);
+        IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+        createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+        VertexBufferSize[3] = sizeof(ControlMeshVerts);
+        IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+        createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
+    }
+
+    if(shouldMoveControlPointLeft) {
+        float coords[] = {ControlMeshVerts[id].Position[0] - 0.01f, ControlMeshVerts[id].Position[1], ControlMeshVerts[id].Position[2]};
+        ControlMeshVerts[id].SetPosition(coords);
+        VertexBufferSize[2] = sizeof(ControlMeshVerts);
+        IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+        createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+        VertexBufferSize[3] = sizeof(ControlMeshVerts);
+        IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+        createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
+    }
+
+    if(shouldMoveControlPointRight) {
+        float coords[] = {ControlMeshVerts[id].Position[0] + 0.01f, ControlMeshVerts[id].Position[1], ControlMeshVerts[id].Position[2]};
+        ControlMeshVerts[id].SetPosition(coords);
+        VertexBufferSize[2] = sizeof(ControlMeshVerts);
+        IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+        createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+        VertexBufferSize[3] = sizeof(ControlMeshVerts);
+        IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+        createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
+    }
+
+    if(shouldMoveControlPointUp) {
+        float coords[] = {ControlMeshVerts[id].Position[0], ControlMeshVerts[id].Position[1] + 0.01f, ControlMeshVerts[id].Position[2]};
+        ControlMeshVerts[id].SetPosition(coords);
+        VertexBufferSize[2] = sizeof(ControlMeshVerts);
+        IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+        createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+        VertexBufferSize[3] = sizeof(ControlMeshVerts);
+        IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+        createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
+    }
+
+    if(shouldMoveControlPointDown) {
+        float coords[] = {ControlMeshVerts[id].Position[0], ControlMeshVerts[id].Position[1] - 0.01f, ControlMeshVerts[id].Position[2]};
+        ControlMeshVerts[id].SetPosition(coords);
+        VertexBufferSize[2] = sizeof(ControlMeshVerts);
+        IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+        createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+        VertexBufferSize[3] = sizeof(ControlMeshVerts);
+        IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+        createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
+    }
+
 	glUseProgram(programID);
 	{
-		glm::vec3 lightPos = glm::vec3(4, 4, 4);
+        glm::vec3 lightPos = glm::vec3(0, 20, -10);
+        glm::vec3 light1Pos = glm::vec3(10, 20, -10);
+        glm::vec3 light2Pos = glm::vec3(-10, 20, -10);
 		glm::mat4x4 ModelMatrix = glm::mat4(1.0);
 		glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
+        glUniform3f(Light1ID, light1Pos.x, light1Pos.y, light1Pos.z);
+        glUniform3f(Light2ID, light2Pos.x, light2Pos.y, light2Pos.z);
 		glUniformMatrix4fv(ViewMatrixID, 1, GL_FALSE, &gViewMatrix[0][0]);
 		glUniformMatrix4fv(ProjMatrixID, 1, GL_FALSE, &gProjectionMatrix[0][0]);
 		glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrix[0][0]);
@@ -392,15 +482,24 @@ void renderScene(void)
             glDrawArrays(GL_POINTS, 0, 3721);
             glDrawElements(GL_LINES, 14884, GL_UNSIGNED_SHORT, (GLvoid*)0);
         }
+
+        if(shouldLoadHair) {
+            glBindVertexArray(VertexArrayId[7]);
+            glDrawElements(GL_TRIANGLES, NumIndices[7], GL_UNSIGNED_SHORT, (void*)0);
+        }
 			
 		glBindVertexArray(0);
 	}
 
     if(shouldDisplayControlMesh || shouldSubdivideControlMesh) {
         glUseProgram(textureProgramID); {
-            glm::vec3 lightPos = glm::vec3(4, 4, 4);
+            glm::vec3 lightPos = glm::vec3(0, 20, -10);
+            glm::vec3 light1Pos = glm::vec3(10, 20, -10);
+            glm::vec3 light2Pos = glm::vec3(-10, 20, -10);
             glm::mat4x4 ModelMatrix = glm::mat4(1.0);
-            glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
+            glUniform3f(LightID_tex, lightPos.x, lightPos.y, lightPos.z);
+            glUniform3f(Light1ID_tex, light1Pos.x, light1Pos.y, light1Pos.z);
+            glUniform3f(Light2ID_tex, light2Pos.x, light2Pos.y, light2Pos.z);
             glUniformMatrix4fv(ViewMatrixID, 1, GL_FALSE, &gViewMatrix[0][0]);
             glUniformMatrix4fv(ProjMatrixID, 1, GL_FALSE, &gProjectionMatrix[0][0]);
             glUniformMatrix4fv(ModelMatrixID, 1, GL_FALSE, &ModelMatrix[0][0]);
@@ -477,6 +576,9 @@ void pickObject(void)
     double epsilon = 0.1;
     double proj;
     bool found = rayTestPoints(ControlMeshVerts, startMousePos, endMousePos, &id, &proj, epsilon);
+    if(id > 440) {
+        id = 0;
+    }
     cout << "id: " << id << endl;
 
 	// Convert the color back to an integer ID
@@ -578,41 +680,106 @@ bool rayTestPoints(Vertex* vert, vec3 start, vec3 end, unsigned int *id, double 
     return foundCollision;
 }
 
-void automate_ray(int j) {
+void automate_ray(int range_min, int range_max, float dir_x, float dir_y, float dir_z, float face_verts_cutoff) {
     float cg[3];
-    for(int j=0;j<441;j++)
+    int coord_index = 0;
+    if(dir_x == 1) {
+        coord_index = 0;
+    } else if(dir_y == 1) {
+        coord_index = 1;
+    } else if(dir_z == 1) {
+        coord_index = 2;
+    }
+
+    bool condition = false;
+
+    for(int j = range_min; j < range_max; j++)
     {
         for (int i = NumIndices[4] - 1; i > 0; i = i - 3) {
-            if (/*Face_Verts[Face_Idcs[i]].Position[0]< ControlMeshVerts[j].Position[0] + 0.5f && Face_Verts[Face_Idcs[i]].Position[0]> ControlMeshVerts[j].Position[0] - 0.5f && Face_Verts[Face_Idcs[i]].Position[1]< ControlMeshVerts[j].Position[1] + 0.5f && Face_Verts[Face_Idcs[i]].Position[1]> ControlMeshVerts[j].Position[1] - 0.5f &&*/ Face_Verts[Face_Idcs[i]].Position[2] < 3.0f) {
+            if(dir_z != 0) {
+                condition = Face_Verts[Face_Idcs[i]].Position[0] < ControlMeshVerts[j].Position[0] + 5.0f
+                        && Face_Verts[Face_Idcs[i]].Position[0] > ControlMeshVerts[j].Position[0] - 5.0f
+                        && Face_Verts[Face_Idcs[i]].Position[1] < ControlMeshVerts[j].Position[1] + 5.0f
+                        && Face_Verts[Face_Idcs[i]].Position[1] > ControlMeshVerts[j].Position[1] - 5.0f
+                        && Face_Verts[Face_Idcs[i]].Position[coord_index] < face_verts_cutoff;
+            } else if(dir_x != 0) {
+                if(face_verts_cutoff > 0) {
+                    condition = Face_Verts[Face_Idcs[i]].Position[0] < ControlMeshVerts[j].Position[0] + 5.0f
+                            && Face_Verts[Face_Idcs[i]].Position[0] > ControlMeshVerts[j].Position[0] - 5.0f
+                            && Face_Verts[Face_Idcs[i]].Position[1] < ControlMeshVerts[j].Position[1] + 5.0f
+                            && Face_Verts[Face_Idcs[i]].Position[1] > ControlMeshVerts[j].Position[1] - 5.0f
+                            && Face_Verts[Face_Idcs[i]].Position[coord_index] > face_verts_cutoff;
+                } else {
+                    condition = Face_Verts[Face_Idcs[i]].Position[0] < ControlMeshVerts[j].Position[0] + 5.0f
+                            && Face_Verts[Face_Idcs[i]].Position[0] > ControlMeshVerts[j].Position[0] - 5.0f
+                            && Face_Verts[Face_Idcs[i]].Position[1] < ControlMeshVerts[j].Position[1] + 5.0f
+                            && Face_Verts[Face_Idcs[i]].Position[1] > ControlMeshVerts[j].Position[1] - 5.0f
+                            && Face_Verts[Face_Idcs[i]].Position[coord_index] < face_verts_cutoff;
+                }
+            } else if(dir_y != 0) {
+                condition = Face_Verts[Face_Idcs[i]].Position[0] < ControlMeshVerts[j].Position[0] + 5.0f
+                        && Face_Verts[Face_Idcs[i]].Position[0] > ControlMeshVerts[j].Position[0] - 5.0f
+                        && Face_Verts[Face_Idcs[i]].Position[1] < ControlMeshVerts[j].Position[1] + 5.0f
+                        && Face_Verts[Face_Idcs[i]].Position[1] > ControlMeshVerts[j].Position[1] - 5.0f
+                        && Face_Verts[Face_Idcs[i]].Position[coord_index] > face_verts_cutoff;
+            }
+
+            if (condition) {
                 const float v1[3] = { Face_Verts[Face_Idcs[i]].Position[0] ,Face_Verts[Face_Idcs[i]].Position[1],Face_Verts[Face_Idcs[i]].Position[2] };
                 const float v2[3] = { Face_Verts[Face_Idcs[i + 1]].Position[0] ,Face_Verts[Face_Idcs[i + 1]].Position[1],Face_Verts[Face_Idcs[i + 1]].Position[2] };
                 const float v3[3] = { Face_Verts[Face_Idcs[i + 2]].Position[0] ,Face_Verts[Face_Idcs[i + 2]].Position[1],Face_Verts[Face_Idcs[i + 2]].Position[2] };
                 const float p[3] = { ControlMeshVerts[j].Position[0] ,ControlMeshVerts[j].Position[1],ControlMeshVerts[j].Position[2] };
-                const float dir[3] = { 0,0,1 };
+                const float dir[3] = { dir_x, dir_y , dir_z };
                 ray_cast(v1, v2, v3, p, dir, cg);
-                cout << "barycentric-"<<j<<":" << cg[0] << " " << cg[1] << " " << cg[2] << endl;
                 if (cg[0] >= 0 && cg[1] >= 0 && cg[2] >= 0)
                 {
-                    float newval[3] = { ControlMeshVerts[j].Position[0],ControlMeshVerts[j].Position[1],Face_Verts[Face_Idcs[i]].Position[2] - 0.5f };
-                    ControlMeshVerts[j].SetPosition(newval);
-                    //vGridVertices[j].Position[2] = Face_Verts[Face_Idcs[i]].Position[2];
-                    //if(vGridVertices[j].Position[2]< (-1.0f))
+                    if(dir_x != 0) {
+                        float newX = (Face_Verts[Face_Idcs[i]].Position[0] + Face_Verts[Face_Idcs[i + 1]].Position[0] + Face_Verts[Face_Idcs[i + 2]].Position[0]) / 3.0f;
+                        float newval[3] = { newX - 0.5f, ControlMeshVerts[j].Position[1], ControlMeshVerts[j].Position[2]};
+                        ControlMeshVerts[j].SetPosition(newval);
+                    }
+
+                    if(dir_y != 0) {
+                        float newY = (Face_Verts[Face_Idcs[i]].Position[1] + Face_Verts[Face_Idcs[i + 1]].Position[1] + Face_Verts[Face_Idcs[i + 2]].Position[1]) / 3.0f;
+                        float newval[3] = { ControlMeshVerts[j].Position[0], newY - 0.5f, ControlMeshVerts[j].Position[2]};
+                        ControlMeshVerts[j].SetPosition(newval);
+                    }
+
+                    if(dir_z != 0) {
+                        float newZ = (Face_Verts[Face_Idcs[i]].Position[2] + Face_Verts[Face_Idcs[i + 1]].Position[2] + Face_Verts[Face_Idcs[i + 2]].Position[2]) / 3.0f;
+                        float newval[3] = { ControlMeshVerts[j].Position[0], ControlMeshVerts[j].Position[1], newZ - 0.5f};
+                        ControlMeshVerts[j].SetPosition(newval);
+                    }
+
                     break;
-                } else {
-                    float newval[3] = { ControlMeshVerts[j].Position[0],ControlMeshVerts[j].Position[1], 4.0f };
-                    ControlMeshVerts[j].SetPosition(newval);
                 }
             } else {
-                float newval[3] = { ControlMeshVerts[j].Position[0],ControlMeshVerts[j].Position[1], 4.0f };
-                ControlMeshVerts[j].SetPosition(newval);
+                if(dir_z != 0) {
+                    float newval[3] = { ControlMeshVerts[j].Position[0], ControlMeshVerts[j].Position[1], 2.0f };
+                    ControlMeshVerts[j].SetPosition(newval);
+                }
+
+                /*if(dir_x != 0) {
+                    float newval[3] = { face_verts_cutoff, ControlMeshVerts[j].Position[1], ControlMeshVerts[j].Position[2] };
+                    ControlMeshVerts[j].SetPosition(newval);
+                }*/
+
+                if(dir_y != 0) {
+                    float newval[3] = { ControlMeshVerts[j].Position[0], face_verts_cutoff, ControlMeshVerts[j].Position[2] };
+                    ControlMeshVerts[j].SetPosition(newval);
+                }
             }
         }
         VertexBufferSize[2] = sizeof(ControlMeshVerts);
         IndexBufferSize[2] = sizeof(ControlMeshIdcs);
         createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+        VertexBufferSize[3] = sizeof(ControlMeshVerts);
+        IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+        createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
     }
 
-    cout << "barycentric:" << cg[0] << " " << cg[1] << " " << cg[2] << endl;
+    //cout << "barycentric:" << cg[0] << " " << cg[1] << " " << cg[2] << endl;
 }
 
 int initWindow(void)
@@ -696,6 +863,13 @@ void initOpenGL(void)
 	pickingColorID = glGetUniformLocation(pickingProgramID, "PickingColor");
 	// Get a handle for our "LightPosition" uniform
 	LightID = glGetUniformLocation(programID, "LightPosition_worldspace");
+    Light1ID = glGetUniformLocation(programID, "Light1Position_worldspace");
+    Light2ID = glGetUniformLocation(programID, "Light2Position_worldspace");
+
+    LightID_tex = glGetUniformLocation(textureProgramID, "LightPosition_worldspace");
+    Light1ID_tex = glGetUniformLocation(textureProgramID, "Light1Position_worldspace");
+    Light2ID_tex = glGetUniformLocation(textureProgramID, "Light2Position_worldspace");
+
     TextureID = glGetUniformLocation(textureProgramID, "myTextureSampler");
 
 	createObjects();
@@ -835,6 +1009,13 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
 			break;
 		case GLFW_KEY_W:
 			break;
+        case GLFW_KEY_M:
+            if(shouldMoveControlPoint) {
+                shouldMoveControlPoint = false;
+            } else {
+                shouldMoveControlPoint = true;
+            }
+            break;
         case GLFW_KEY_R:
             shouldResetScene = true;
             resetScene();
@@ -854,6 +1035,24 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
             break;
         case GLFW_KEY_DOWN:
             moveCameraDown = true;
+            break;
+        case GLFW_KEY_COMMA:
+            shouldMoveControlPointBackward = true;
+            break;
+        case GLFW_KEY_PERIOD:
+            shouldMoveControlPointForward = true;
+            break;
+        case GLFW_KEY_9:
+            shouldMoveControlPointLeft = true;
+            break;
+        case GLFW_KEY_0:
+            shouldMoveControlPointRight = true;
+            break;
+        case GLFW_KEY_LEFT_BRACKET:
+            shouldMoveControlPointUp = true;
+            break;
+        case GLFW_KEY_RIGHT_BRACKET:
+            shouldMoveControlPointDown = true;
             break;
 		default:
 			break;
@@ -878,8 +1077,22 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
                 shouldDisplayFaceMesh = true;
             }
             break;
+        case GLFW_KEY_H:
+            if(shouldLoadHair) {
+                shouldLoadHair = false;
+            } else {
+                shouldLoadHair = true;
+            }
+            break;
         case GLFW_KEY_L:
             loadControlPoints();
+            break;
+        case GLFW_KEY_M:
+            if(shouldMoveControlPoint) {
+                shouldMoveControlPoint = false;
+            } else {
+                shouldMoveControlPoint = true;
+            }
             break;
         case GLFW_KEY_R:
             shouldResetScene = false;
@@ -887,8 +1100,11 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
         case GLFW_KEY_S:
             saveControlPoints();
             break;
+        case GLFW_KEY_T:
+            rotateRestGrid();
+            break;
         case GLFW_KEY_Z:
-            automate_ray(id);
+            automate_ray(0, 441, 0, 0, 1, 3.0f);
             break;
         case GLFW_KEY_LEFT:
             moveCameraLeft = false;
@@ -901,6 +1117,24 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
             break;
         case GLFW_KEY_DOWN:
             moveCameraDown = false;
+            break;
+        case GLFW_KEY_COMMA:
+            shouldMoveControlPointBackward = false;
+            break;
+        case GLFW_KEY_PERIOD:
+            shouldMoveControlPointForward = false;
+            break;
+        case GLFW_KEY_9:
+            shouldMoveControlPointLeft = false;
+            break;
+        case GLFW_KEY_0:
+            shouldMoveControlPointRight = false;
+            break;
+        case GLFW_KEY_LEFT_BRACKET:
+            shouldMoveControlPointUp = false;
+            break;
+        case GLFW_KEY_RIGHT_BRACKET:
+            shouldMoveControlPointDown = false;
             break;
         default:
             break;
@@ -1240,7 +1474,7 @@ void subdivideControlMesh() {
         cout << "index 3 * j " << 3 * j << endl;
         ControlMeshSubdivVerts[3 * j].Position[0] = c00.x;
         ControlMeshSubdivVerts[3 * j].Position[1] = c00.y;
-        ControlMeshSubdivVerts[3 * j].Position[2] = s11->z;
+        ControlMeshSubdivVerts[3 * j].Position[2] = c00.z - 0.3f;
         ControlMeshSubdivVerts[3 * j].Position[3] = 1.0f;
         ControlMeshSubdivVerts[3 * j].SetColor(colorRed);
         ControlMeshSubdivVerts[3 * j].SetNormal(controlMeshNormal);
@@ -1251,7 +1485,7 @@ void subdivideControlMesh() {
             cout << "index 3 * j +1 " << 3 * j + 1 << endl;
             ControlMeshSubdivVerts[3 * j + 1].Position[0] = c01.x;
             ControlMeshSubdivVerts[3 * j + 1].Position[1] = c01.y;
-            ControlMeshSubdivVerts[3 * j + 1].Position[2] = s11->z;
+            ControlMeshSubdivVerts[3 * j + 1].Position[2] = c01.z - 0.3f;
             ControlMeshSubdivVerts[3 * j + 1].Position[3] = 1.0f;
             ControlMeshSubdivVerts[3 * j + 1].SetColor(colorRed);
             ControlMeshSubdivVerts[3 * j + 1].SetNormal(controlMeshNormal);
@@ -1261,7 +1495,7 @@ void subdivideControlMesh() {
             cout << "index 3 * j + 2 " << 3 * j + 2 << endl;
             ControlMeshSubdivVerts[3 * j + 2].Position[0] = c02.x;
             ControlMeshSubdivVerts[3 * j + 2].Position[1] = c02.y;
-            ControlMeshSubdivVerts[3 * j + 2].Position[2] = s11->z;
+            ControlMeshSubdivVerts[3 * j + 2].Position[2] = c02.z - 0.3f;
             ControlMeshSubdivVerts[3 * j + 2].Position[3] = 1.0f;
             ControlMeshSubdivVerts[3 * j + 2].SetColor(colorRed);
             ControlMeshSubdivVerts[3 * j + 2].SetNormal(controlMeshNormal);
@@ -1273,7 +1507,7 @@ void subdivideControlMesh() {
             cout << "index 3 * j + 61 " << 3 * j + 61 << endl;
             ControlMeshSubdivVerts[3 * j + 61].Position[0] = c10.x;
             ControlMeshSubdivVerts[3 * j + 61].Position[1] = c10.y;
-            ControlMeshSubdivVerts[3 * j + 61].Position[2] = s11->z;
+            ControlMeshSubdivVerts[3 * j + 61].Position[2] = c10.z - 0.3f;
             ControlMeshSubdivVerts[3 * j + 61].Position[3] = 1.0f;
             ControlMeshSubdivVerts[3 * j + 61].SetColor(colorRed);
             ControlMeshSubdivVerts[3 * j + 61].SetNormal(controlMeshNormal);
@@ -1284,7 +1518,7 @@ void subdivideControlMesh() {
                 cout << "index 3 * j + 62 " << 3 * j + 62<< endl;
                 ControlMeshSubdivVerts[3 * j + 62].Position[0] = c11.x;
                 ControlMeshSubdivVerts[3 * j + 62].Position[1] = c11.y;
-                ControlMeshSubdivVerts[3 * j + 62].Position[2] = s11->z;
+                ControlMeshSubdivVerts[3 * j + 62].Position[2] = c11.z - 0.3f;
                 ControlMeshSubdivVerts[3 * j + 62].Position[3] = 1.0f;
                 ControlMeshSubdivVerts[3 * j + 62].SetColor(colorRed);
                 ControlMeshSubdivVerts[3 * j + 62].SetNormal(controlMeshNormal);
@@ -1294,7 +1528,7 @@ void subdivideControlMesh() {
                 cout << "index 3 * j + 63 " << 3 * j + 63 << endl;
                 ControlMeshSubdivVerts[3 * j + 63].Position[0] = c12.x;
                 ControlMeshSubdivVerts[3 * j + 63].Position[1] = c12.y;
-                ControlMeshSubdivVerts[3 * j + 63].Position[2] = s11->z;
+                ControlMeshSubdivVerts[3 * j + 63].Position[2] = c12.z - 0.3f;
                 ControlMeshSubdivVerts[3 * j + 63].Position[3] = 1.0f;
                 ControlMeshSubdivVerts[3 * j + 63].SetColor(colorRed);
                 ControlMeshSubdivVerts[3 * j + 63].SetNormal(controlMeshNormal);
@@ -1305,7 +1539,7 @@ void subdivideControlMesh() {
             cout << "index 3 * j + 122 " << 3 * j + 122 << endl;
             ControlMeshSubdivVerts[3 * j + 122].Position[0] = c20.x;
             ControlMeshSubdivVerts[3 * j + 122].Position[1] = c20.y;
-            ControlMeshSubdivVerts[3 * j + 122].Position[2] = s11->z;
+            ControlMeshSubdivVerts[3 * j + 122].Position[2] = c20.z - 0.3f;
             ControlMeshSubdivVerts[3 * j + 122].Position[3] = 1.0f;
             ControlMeshSubdivVerts[3 * j + 122].SetColor(colorRed);
             ControlMeshSubdivVerts[3 * j + 122].SetNormal(controlMeshNormal);
@@ -1316,7 +1550,7 @@ void subdivideControlMesh() {
                 cout << "index 3 * j + 123 " << 3 * j + 123 << endl;
                 ControlMeshSubdivVerts[3 * j + 123].Position[0] = c21.x;
                 ControlMeshSubdivVerts[3 * j + 123].Position[1] = c21.y;
-                ControlMeshSubdivVerts[3 * j + 123].Position[2] = s11->z;
+                ControlMeshSubdivVerts[3 * j + 123].Position[2] = c21.z - 0.3f;
                 ControlMeshSubdivVerts[3 * j + 123].Position[3] = 1.0f;
                 ControlMeshSubdivVerts[3 * j + 123].SetColor(colorRed);
                 ControlMeshSubdivVerts[3 * j + 123].SetNormal(controlMeshNormal);
@@ -1326,7 +1560,7 @@ void subdivideControlMesh() {
                 cout << "index 3 * j + 124 " << 3 * j + 124 << endl;
                 ControlMeshSubdivVerts[3 * j + 124].Position[0] = c22.x;
                 ControlMeshSubdivVerts[3 * j + 124].Position[1] = c22.y;
-                ControlMeshSubdivVerts[3 * j + 124].Position[2] = s11->z;
+                ControlMeshSubdivVerts[3 * j + 124].Position[2] = c22.z - 0.3f;
                 ControlMeshSubdivVerts[3 * j + 124].Position[3] = 1.0f;
                 ControlMeshSubdivVerts[3 * j + 124].SetColor(colorRed);
                 ControlMeshSubdivVerts[3 * j + 124].SetNormal(controlMeshNormal);
@@ -1384,6 +1618,65 @@ void subdivideControlMesh() {
     VertexBufferSize[6] = sizeof(ControlMeshSubdivVerts);
     IndexBufferSize[6] = sizeof(ControlMeshSubdivIdcsForTex);
     createVAOsForTex(ControlMeshSubdivVerts, ControlMeshSubdivIdcsForTex, 6);
+}
+
+void rotateRestGrid() {
+    for(int i = 0; i < 189; i++) {
+        ControlMeshVerts[i].Position[0] = -3.0f;
+        if(i < 21) {
+            ControlMeshVerts[i].Position[2] += 9;
+        } else if(i >= 21 && i < 42) {
+            ControlMeshVerts[i].Position[2] += 8;
+        } else if(i >= 42 && i < 63) {
+            ControlMeshVerts[i].Position[2] += 7;
+        } else if(i >= 63 && i < 84) {
+            ControlMeshVerts[i].Position[2] += 6;
+        } else if(i >= 84 && i < 105) {
+            ControlMeshVerts[i].Position[2] += 5;
+        } else if(i >= 105 && i < 126) {
+            ControlMeshVerts[i].Position[2] += 4;
+        } else if(i >= 126 && i < 147) {
+            ControlMeshVerts[i].Position[2] += 3;
+        } else if(i >= 147 && i < 168) {
+            ControlMeshVerts[i].Position[2] += 2;
+        } else if(i >= 168 && i < 189) {
+            ControlMeshVerts[i].Position[2] += 1;
+        }
+    }
+
+    automate_ray(0, 189, 1, 0, 0, -1.0f);
+
+    for(int i = 336; i < 441; i++) {
+        if(i >= 336 && i < 357) {
+            ControlMeshVerts[i].Position[2] += 1;
+        } else if(i >= 357 && i < 378) {
+            ControlMeshVerts[i].Position[2] += 2;
+        } else if(i >= 378 && i < 399) {
+            ControlMeshVerts[i].Position[2] += 3;
+        } else if(i >= 399 && i < 420) {
+            ControlMeshVerts[i].Position[2] += 4;
+        } else if(i >= 420 && i < 441) {
+            ControlMeshVerts[i].Position[2] += 5;
+        }
+    }
+
+    automate_ray(336, 441, -1, 0, 0, 4.0f);
+
+    for(int i = 15; i < 21; i++) {
+        for(int j = 0; j < 21; j++) {
+            ControlMeshVerts[21 * j + i].Position[2] += i - 15;
+            if(21 * j + i + 1 < 440)
+                automate_ray(21 * j + i, 21 * j + i + 1, 0, -1, 0, 14.0f);
+        }
+    }
+
+    VertexBufferSize[2] = sizeof(ControlMeshVerts);
+    IndexBufferSize[2] = sizeof(ControlMeshIdcs);
+    createVAOs(ControlMeshVerts, ControlMeshIdcs, 2);
+
+    VertexBufferSize[3] = sizeof(ControlMeshVerts);
+    IndexBufferSize[3] = sizeof(ControlMeshIdcsForTex);
+    createVAOsForTex(ControlMeshVerts, ControlMeshIdcsForTex, 3);
 }
 
 int main(void)
