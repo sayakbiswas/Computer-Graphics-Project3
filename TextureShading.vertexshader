@@ -4,6 +4,7 @@
 layout(location = 0) in vec4 vertexPosition_modelspace;
 //layout(location = 1) in vec4 vertexColor;
 layout(location = 1) in vec2 vertexUV;
+layout(location = 2) in vec3 vertexNormal_modelspace;
 
 // Output data ; will be interpolated for each fragment.
 //out vec4 vs_vertexColor;
@@ -12,12 +13,16 @@ out vec3 Position_worldspace;
 out vec3 Normal_cameraspace;
 out vec3 EyeDirection_cameraspace;
 out vec3 LightDirection_cameraspace;
+out vec3 Light1Direction_cameraspace;
+out vec3 Light2Direction_cameraspace;
 
 // Values that stay constant for the whole mesh.
 uniform mat4 M;
 uniform mat4 V;
 uniform mat4 P;
 uniform vec3 LightPosition_worldspace;
+uniform vec3 Light1Position_worldspace;
+uniform vec3 Light2Position_worldspace;
 
 void main(){
 	gl_PointSize = 5.0;
@@ -34,10 +39,14 @@ void main(){
 
 	// Vector that goes from the vertex to the light, in camera space. M is ommited because it's identity.
 	vec3 LightPosition_cameraspace = ( V * vec4(LightPosition_worldspace,1)).xyz;
-	LightDirection_cameraspace = LightPosition_cameraspace + EyeDirection_cameraspace;
-	
+        vec3 Light1Position_cameraspace = ( V * vec4(Light1Position_worldspace,1)).xyz;
+        vec3 Light2Position_cameraspace = ( V * vec4(Light2Position_worldspace,1)).xyz;
+        LightDirection_cameraspace = LightPosition_cameraspace + EyeDirection_cameraspace;
+        Light1Direction_cameraspace = Light1Position_cameraspace + EyeDirection_cameraspace;
+        Light2Direction_cameraspace = Light2Position_cameraspace + EyeDirection_cameraspace;
+
 	// Normal of the the vertex, in camera space
-	Normal_cameraspace = ( V * M * vec4(1.0)).xyz; // Only correct if ModelMatrix does not scale the model ! Use its inverse transpose if not.
+        Normal_cameraspace = ( V * M * vec4(vertexNormal_modelspace, 0)).xyz; // Only correct if ModelMatrix does not scale the model ! Use its inverse transpose if not.
 	
 	// UV of the vertex. No special space for this one.
 	//vs_vertexColor = vertexColor;
