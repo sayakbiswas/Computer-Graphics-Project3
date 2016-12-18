@@ -26,12 +26,12 @@ void main(){
         vec3 Light1Color = vec3(0.5,0,0.5);
         vec3 Light2Color = vec3(0.5,0.5,0);
         float LightPower = 200.0f;
-        float Light1Power = 100.0f;
-        float Light2Power = 100.0f;
+        float Light1Power = 50.0f;
+        float Light2Power = 50.0f;
 	
 	// Material properties
 	vec3 MaterialDiffuseColor = vs_vertexColor.rgb;
-        vec3 MaterialAmbientColor = vec3(0.9,0.9,0.9) * MaterialDiffuseColor;
+        vec3 MaterialAmbientColor = vec3(0.5,0.5,0.5) * MaterialDiffuseColor;
         vec3 MaterialSpecularColor = vec3(0.3,0.3,0.3) * MaterialDiffuseColor;
 
 	// Distance to the light
